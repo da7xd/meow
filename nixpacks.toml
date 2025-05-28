@@ -1,6 +1,6 @@
 # nixpacks.toml
 [phases.setup]
-aptPkgs = ["ffmpeg"]
+aptPkgs = ["ffmpeg", "libopus-dev", "libopus0"]
 
 [start]
 cmd = "python bot.py"
