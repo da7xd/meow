@@ -1,8 +1,6 @@
 # nixpacks.toml
 [phases.setup]
-# This tells Nixpacks (which Railway uses) to install ffmpeg on the server
 aptPkgs = ["ffmpeg"]
 
 [start]
-# This reinforces the start command, though Procfile usually takes precedence for workers
 cmd = "python bot.py"
