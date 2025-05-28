@@ -11,8 +11,8 @@ load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
 PREFIX = "!" # Or your preferred prefix
 
-# Suppress noise about console usage from errors
-yt_dlp.utils.bug_reports_message = lambda: ''
+# DO NOT MODIFY yt_dlp.utils.bug_reports_message directly like this:
+# # yt_dlp.utils.bug_reports_message = lambda: '' # THIS LINE WAS CAUSING THE TypeError
 
 # YTDL options for streaming audio (temporarily verbose for debugging)
 YTDL_FORMAT_OPTIONS = {
@@ -21,12 +21,12 @@ YTDL_FORMAT_OPTIONS = {
     'restrictfilenames': True,
     'noplaylist': True,
     'nocheckcertificate': True,
-    'ignoreerrors': False,
-    'logtostderr': True,  # VERBOSE FOR DEBUG
-    'quiet': False,       # VERBOSE FOR DEBUG
-    'no_warnings': True,  # Still keep warnings off unless needed
+    'ignoreerrors': False, # Set to False to see underlying yt-dlp errors
+    'logtostderr': True,  # VERBOSE FOR DEBUG - set to False later
+    'quiet': False,       # VERBOSE FOR DEBUG - set to True later
+    'no_warnings': True,
     'default_search': 'auto',
-    'source_address': '0.0.0.0',  # Bind to all IPs (might be needed in some environments)
+    'source_address': '0.0.0.0',
 }
 
 FFMPEG_OPTIONS = {
@@ -38,22 +38,18 @@ FFMPEG_OPTIONS = {
 intents = discord.Intents.default()
 intents.message_content = True
 intents.guilds = True
-intents.voice_states = True # Needed for voice client and on_voice_state_update
+intents.voice_states = True
 
-bot = commands.Bot(command_prefix=PREFIX, intents=intents, help_command=None) # Custom help later if needed
+bot = commands.Bot(command_prefix=PREFIX, intents=intents, help_command=None)
 
 # --- Global State for Music ---
-music_queues = {} # guild_id: {"queue": [], "voice_client": None, "current_song": None, "loop": False, "keep_alive_active": False, "is_playing_silence": False, "last_channel_id": None}
+music_queues = {}
 
 def get_guild_state(guild_id):
     if guild_id not in music_queues:
         music_queues[guild_id] = {
-            "queue": [],
-            "voice_client": None,
-            "current_song": None,
-            "loop": False,
-            "keep_alive_active": False,
-            "is_playing_silence": False,
+            "queue": [], "voice_client": None, "current_song": None,
+            "loop": False, "keep_alive_active": False, "is_playing_silence": False,
             "last_channel_id": None
         }
     return music_queues[guild_id]
@@ -73,7 +69,6 @@ async def search_youtube(query: str):
         with yt_dlp.YoutubeDL(YTDL_FORMAT_OPTIONS) as ydl:
             loop = asyncio.get_event_loop()
             
-            # Define the blocking function to be run in the executor
             def extract_info_sync():
                 return ydl.extract_info(search_target, download=False)
 
@@ -91,7 +86,7 @@ async def search_youtube(query: str):
                 data_to_use = info
                 print(f"DEBUG: yt-dlp processed direct URL or single result.")
             else:
-                print(f"DEBUG: yt-dlp extracted data in unexpected format for '{search_target}'. Full info: {str(info)[:500]}") # Log part of the info
+                print(f"DEBUG: yt-dlp extracted data in unexpected format for '{search_target}'. Full info: {str(info)[:500]}")
                 return None
             
             if not data_to_use or 'url' not in data_to_use or 'title' not in data_to_use:
@@ -103,7 +98,7 @@ async def search_youtube(query: str):
 
     except Exception as e:
         print(f"CRITICAL Error in search_youtube for '{query}': {e}")
-        traceback.print_exc() # Print full traceback to logs
+        traceback.print_exc()
         return None
 
 
@@ -121,9 +116,7 @@ async def play_next(guild_id):
         song_info = state["queue"].pop(0)
         state["current_song"] = song_info
         try:
-            # Ensure FFmpeg path is correctly found or specify it if needed
-            # executable_path = "ffmpeg" # Or full path if not in PATH on server
-            player = discord.FFmpegPCMAudio(song_info['source'], **FFMPEG_OPTIONS) # executable=executable_path
+            player = discord.FFmpegPCMAudio(song_info['source'], **FFMPEG_OPTIONS)
             state["voice_client"].play(player, after=lambda e: asyncio.run_coroutine_threadsafe(play_next_after_error(e, guild_id), bot.loop))
             print(f"[{guild_id}] Now playing: {song_info['title']}")
         except Exception as e:
@@ -152,22 +145,14 @@ async def play_silent_audio_if_needed(guild_id):
         print(f"[{guild_id}] Attempting to play conceptual silent audio to keep alive.")
         state["is_playing_silence"] = True
         try:
-            # This is a placeholder. A real silent stream is needed for robust 24/7.
-            # For example, using anullsrc with FFmpeg.
-            # FFmpegPCMAudio("-f lavfi -i anullsrc=channel_layout=stereo:sample_rate=48000 -t 5 -c:a pcm_s16le -f s16le pipe:1", **FFMPEG_OPTIONS)
-            # This is complex to get right without testing the FFmpeg command.
-            # For now, the task loop is the main "keep active" mechanism for the VC presence.
-            # We can simulate a short activity here just to ensure the logic path is tested.
-            await asyncio.sleep(1) # Minimal activity
-            if state["is_playing_silence"]: # If state hasn't changed (e.g. new song added)
-                state["is_playing_silence"] = False # Reset after conceptual play
+            await asyncio.sleep(1) 
+            if state["is_playing_silence"]: 
+                state["is_playing_silence"] = False 
                 print(f"[{guild_id}] Conceptual silent audio period ended.")
         except Exception as e:
             print(f"[{guild_id}] Error during conceptual silent audio: {e}")
             state["is_playing_silence"] = False
-    # else:
-    #     state["is_playing_silence"] = False # Ensure it's false if conditions not met
-
+    
 
 async def attempt_rejoin(guild_id):
     state = get_guild_state(guild_id)
@@ -200,12 +185,10 @@ async def on_ready():
 
 @tasks.loop(seconds=60)
 async def keep_alive_task():
-    # print("DEBUG: Keep_alive_task running...") # Can be very noisy
     for guild_id, state in list(music_queues.items()):
         if state["voice_client"] and state["voice_client"].is_connected():
             if state["keep_alive_active"] and not state["voice_client"].is_playing() and \
                not state["queue"] and not state["current_song"] and not state["is_playing_silence"]:
-                # print(f"Keep-alive: Guild {guild_id} is active, connected, not playing, queue empty, no current song, not playing silence.")
                 await play_silent_audio_if_needed(guild_id)
         elif state["keep_alive_active"] and state["last_channel_id"]:
             print(f"Keep-alive task: Bot for guild {guild_id} (last known channel {state['last_channel_id']}) is not connected but should be active. Attempting rejoin.")
@@ -240,10 +223,10 @@ async def join(ctx):
             await ctx.send(f"Joined **{channel.name}**.")
         except asyncio.TimeoutError:
             await ctx.send(f"Timed out trying to join **{channel.name}**.")
-            state["voice_client"] = None # Ensure it's None
+            state["voice_client"] = None
         except Exception as e:
             await ctx.send(f"Could not join voice channel **{channel.name}**: {e}")
-            if state["voice_client"]: # Defensive disconnect
+            if state["voice_client"]:
                 try: await state["voice_client"].disconnect(force=True)
                 except: pass
             state["voice_client"] = None
@@ -258,17 +241,16 @@ async def stay(ctx):
     guild_id = ctx.guild.id
     state = get_guild_state(guild_id)
     state["keep_alive_active"] = True
-    state["last_channel_id"] = ctx.author.voice.channel.id # Set it before calling join
+    state["last_channel_id"] = ctx.author.voice.channel.id
 
-    await join(ctx) # join command handles connecting and updating state["voice_client"]
+    await join(ctx)
 
     if state["voice_client"] and state["voice_client"].is_connected():
         await ctx.send("Okay, I will try to stay in this channel.")
-        await play_silent_audio_if_needed(guild_id) # Initial check
+        await play_silent_audio_if_needed(guild_id)
     else:
-        # Join command would have sent a message if it failed
         print(f"[{guild_id}] Stay command: Join failed or VC not established.")
-        state["keep_alive_active"] = False # Revert if join didn't establish VC
+        state["keep_alive_active"] = False
 
 
 @bot.command(name='leave', help='To make the bot leave the voice channel.')
@@ -298,15 +280,14 @@ async def play(ctx, *, query: str):
     if not state["voice_client"] or not state["voice_client"].is_connected():
         if ctx.author.voice:
             await ctx.send("Joining your voice channel first...")
-            await join(ctx) # This will set state["voice_client"]
-            if not state["voice_client"] or not state["voice_client"].is_connected(): # Check again
+            await join(ctx)
+            if not state["voice_client"] or not state["voice_client"].is_connected():
                 await ctx.send("Could not join your voice channel. Please use `!join` or `!stay` first.")
                 return
         else:
             await ctx.send("You are not in a voice channel, and I'm not in one either. Use `!join` or `!stay` first.")
             return
     
-    # Ensure we are in the same channel as the user if they are in one
     if ctx.author.voice and state["voice_client"].channel != ctx.author.voice.channel:
         await ctx.send(f"Moving to your channel: **{ctx.author.voice.channel.name}** to play.")
         await state["voice_client"].move_to(ctx.author.voice.channel)
@@ -334,12 +315,12 @@ async def skip(ctx):
     state = get_guild_state(guild_id)
 
     if state["voice_client"] and state["voice_client"].is_playing():
-        state["voice_client"].stop() # Triggers 'after' in play() which calls play_next()
+        state["voice_client"].stop()
         await ctx.send("Skipped the current song.")
-    elif state["current_song"]: # If something is loaded but not "playing" (e.g. error state)
+    elif state["current_song"]:
         print(f"[{guild_id}] Skipping non-playing current song: {state['current_song']['title']}")
-        state["current_song"] = None # Clear it
-        await play_next(guild_id) # Attempt to play next from queue
+        state["current_song"] = None
+        await play_next(guild_id)
         await ctx.send("Skipped. Trying next song.")
     else:
         await ctx.send("Not playing anything to skip.")
@@ -394,14 +375,12 @@ async def queue(ctx):
     
     if state["current_song"]:
         embed.add_field(name="💿 Now Playing", value=f"**{state['current_song']['title']}**", inline=False)
-    # elif state["is_playing_silence"]:
-    #     embed.add_field(name="💿 Now Playing", value="Playing silence to stay connected...", inline=False)
     else:
         embed.add_field(name="💿 Now Playing", value="Nothing specific is currently playing.", inline=False)
 
     if state["queue"]:
         song_list = ""
-        for i, song in enumerate(state["queue"][:10]): # Show up to 10 songs
+        for i, song in enumerate(state["queue"][:10]):
             song_list += f"{i+1}. {song['title']}\n"
         embed.add_field(name="🎶 Up Next", value=song_list if song_list else "Queue is empty.", inline=False)
         if len(state["queue"]) > 10:
@@ -415,9 +394,7 @@ async def queue(ctx):
 @bot.event
 async def on_command_error(ctx, error):
     if isinstance(error, commands.CommandNotFound):
-        # To avoid spamming, only print to console or do nothing
         print(f"Command not found by {ctx.author}: {ctx.message.content}")
-        # await ctx.send("Invalid command.") # Optional: send message to user
     elif isinstance(error, commands.MissingRequiredArgument):
         await ctx.send(f"Missing argument: `{error.param.name}`. Please provide all required arguments for `!{ctx.command.name}`.")
     elif isinstance(error, commands.CommandInvokeError):
@@ -429,12 +406,10 @@ async def on_command_error(ctx, error):
     else:
         print(f"An unhandled error occurred type {type(error)}: {error}")
         traceback.print_exception(type(error), error, error.__traceback__)
-        # await ctx.send("An unexpected error occurred.")
 
 # --- Run the Bot ---
 if __name__ == "__main__":
     print("DEBUG: Main script execution started...")
-    # Simple check for token for security, print only partial
     token_preview = "TOKEN_NOT_SET"
     if TOKEN:
         token_preview = f"{TOKEN[:5]}...{TOKEN[-5:]}" if len(TOKEN) > 10 else "TOKEN_TOO_SHORT"
@@ -445,11 +420,11 @@ if __name__ == "__main__":
             print("DEBUG: Attempting to run bot with token...")
             bot.run(TOKEN)
         except discord.errors.LoginFailure:
-            print("CRITICAL ERROR: Login Failure! Your DISCORD_TOKEN is incorrect or invalid. Double-check it in your .env file (locally) or environment variables (on server) and on the Discord Developer Portal. Also, make sure all necessary intents are enabled on the portal.")
+            print("CRITICAL ERROR: Login Failure! Your DISCORD_TOKEN is incorrect or invalid...")
         except Exception as e:
             print(f"CRITICAL ERROR during bot.run (outer try-except): {e}")
             traceback.print_exc()
     else:
         print("CRITICAL ERROR: DISCORD_TOKEN not found in environment variables. Bot cannot start.")
 
-    print("DEBUG: bot.run() has exited or script finished (this line should ideally not be reached if bot is running correctly).")
+    print("DEBUG: bot.run() has exited or script finished.")
