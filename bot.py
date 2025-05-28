@@ -11,10 +11,7 @@ load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
 PREFIX = "!" # Or your preferred prefix
 
-# DO NOT MODIFY yt_dlp.utils.bug_reports_message directly like this:
-# # yt_dlp.utils.bug_reports_message = lambda: '' # THIS LINE WAS CAUSING THE TypeError
-
-# YTDL options for streaming audio (temporarily verbose for debugging)
+# YTDL options for streaming audio
 YTDL_FORMAT_OPTIONS = {
     'format': 'bestaudio/best',
     'outtmpl': '%(extractor)s-%(id)s-%(title)s.%(ext)s',
@@ -27,6 +24,7 @@ YTDL_FORMAT_OPTIONS = {
     'no_warnings': True,
     'default_search': 'auto',
     'source_address': '0.0.0.0',
+    'cookiefile': 'cookies.txt'  # <<< IMPORTANT: Telling yt-dlp to use the cookie file
 }
 
 FFMPEG_OPTIONS = {
@@ -64,7 +62,7 @@ async def search_youtube(query: str):
         if not is_url:
             search_target = f"ytsearch:{query}"
 
-        print(f"DEBUG: yt-dlp processing target: {search_target}")
+        print(f"DEBUG: yt-dlp processing target: {search_target} with cookiefile: {YTDL_FORMAT_OPTIONS.get('cookiefile')}")
 
         with yt_dlp.YoutubeDL(YTDL_FORMAT_OPTIONS) as ydl:
             loop = asyncio.get_event_loop()
@@ -97,7 +95,7 @@ async def search_youtube(query: str):
             return {"source": data_to_use['url'], "title": data_to_use['title']}
 
     except Exception as e:
-        print(f"CRITICAL Error in search_youtube for '{query}': {e}")
+        print(f"CRITICAL Error in search_youtube for '{query}': {e}") # This will now show the yt-dlp specific error
         traceback.print_exc()
         return None
 
@@ -162,7 +160,7 @@ async def attempt_rejoin(guild_id):
             print(f"[{guild_id}] Attempting to rejoin channel: {channel.name}")
             try:
                 state["voice_client"] = await channel.connect(timeout=10.0, reconnect=True)
-                await play_next(guild_id)
+                await play_next(guild_id) # Try playing again if queue had items or for silence
             except asyncio.TimeoutError:
                 print(f"[{guild_id}] Timeout trying to rejoin {channel.name}.")
                 state["voice_client"] = None
@@ -298,7 +296,7 @@ async def play(ctx, *, query: str):
         song_info = await search_youtube(query)
 
         if song_info is None:
-            await ctx.send(f"Could not find or process the song: `{query}`.")
+            await ctx.send(f"Could not find or process the song: `{query}`. Check logs for details.") # Updated message
             return
 
         state["queue"].append(song_info)
